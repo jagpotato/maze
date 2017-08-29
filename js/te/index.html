@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>cannon.js - RaycastVehicle</title>
+        <meta charset="utf-8">
+        <style type="text/css">
+            body {
+                margin: 0;
+                padding: 0;
+                background-color: #000;
+            }
+        </style>
+    </head>
+    <body>
+        <script src="cannon.min.js"></script>
+        <script src="three.min.js"></script>
+        <script src="jquery-2.1.1.min.js"></script>
+        <script>
+        $(function () {
+
+            //
+            // ---------- 定数 ---------- //
+            //
+
+            var FPS = 60;
+            var STAGE_WIDTH = 800;
+            var STAGE_HEIGHT = 600;
+
+            var KEY_CODE_UP = 38;
+            var KEY_CODE_DOWN = 40;
+            var KEY_CODE_LEFT = 39;
+            var KEY_CODE_RIGHT = 37;
+            var KEY_CODE_SPACE = 32;
+
+            //
+            // ---------- アクション ---------- //
+            //
+
+            // 物理演算
+            var _physics = Physics();
+            // 3D表示
+            var _viewer = Viewer();
+            // 車両
+            var _viecle = Viecle({scene: _viewer.getScene(), world: _physics.getWorld()});
+            // 車両生成
+            _viecle.create();
+            // 地面
+            var _field = Field({scene: _viewer.getScene(), world: _physics.getWorld()});
+            // 地面生成
+            _field.create();
+            // キー操作
+            var _controller = Controller();
+            // キー操作監視
+            _controller.addListener();
+            // アニメーション
+            function _animate() {
+                requestAnimationFrame(_animate);
+                // 更新
+                _physics.update();
+                _viecle.update();
+                _field.update();
+                var vieclePosition = _viecle.getPosition();
+                var viecleRotation = _viecle.getRotation();
+                _viewer.update({
+                    viecleX: vieclePosition.x,
+                    viecleY: vieclePosition.y,
+                    viecleZ: vieclePosition.z,
+                    viecleRotX: 0,
+                    viecleRotY: 0,
+                    viecleRotZ: viecleRotation.z
+                });
+            }
+            _animate();
+
+            //
+            // ---------- イベント ---------- //
+            //
+
+            // ギア設定
+            function setGearEvent(e) {
+                var val = e.val;
+                // 車両ギア設定
+                _viecle.setGear({
+                    val: val
+                })
+            }
+
+            // アクセルオンイベント
+            function onAcceleratorEvent() {
+                // 車両アクセルオン
+                _viecle.onAccelerator();
+            }
+
+            // アクセルオフイベント
+            function offAcceleratorEvent() {
+                // 車両アクセルオフ
+                _viecle.offAccelerator();
+            }
+
+            // ブレーキオンイベント
+            function onBrakeEvent() {
+                // 車両ブレーキオン
+                _viecle.onBrake();
+            }
+
+            // ブレーキオフイベント
+            function offBrakeEvent() {
+                // 車両ブレーキオフ
+                _viecle.offBrake();
+            }
+
+            // 左に曲がるイベント
+            function turnLeftEvent() {
+                // 車両左に曲がる
+                _viecle.turnLeft();
+            }
+
+            // 右に曲がるイベント
+            function turnRightEvent() {
+                // 車両右に曲がる
+                _viecle.turnRight();
+            }
+
+            // まっすぐに戻るイベント
+            function returnStraightEvent() {
+                // 車両まっすぐに戻る
+                _viecle.returnStraight();
+            }
+
+            //
+            // ---------- モジュール ---------- //
+            //
+
+            /**
+             * ユーティリティ
+             * @returns {{shape2mesh: shape2mesh}}
+             * @constructor
+             */
+            function Utility() {
+
+                return {
+                    shape2mesh: shape2mesh
+                };
+
+                // cannon.jsで作成したbodyからthree.js用のmeshを作成
+                function shape2mesh(params){
+                    var body = params.body;
+                    var color = params.color;
+                    //
+                    if (!color && color != 0) color = 0xdddddd;
+                    var obj = new THREE.Object3D();
+                    for (var l = 0; l < body.shapes.length; l++) {
+                        var shape = body.shapes[l];
+                        var mesh;
+                        var geometry;
+                        var i;
+                        switch(shape.type){
+                            case CANNON.Shape.types.SPHERE:
+                                geometry = new THREE.SphereGeometry(shape.radius, 8, 8);
+                                mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({color: color}));
+                                break;
+                            case CANNON.Shape.types.PARTICLE:
+                                mesh = new THREE.Mesh(this.particleGeo, this.particleMaterial);
+                                mesh.scale.set(10 , 10, 10);
+                                break;
+                            case CANNON.Shape.types.PLANE:
+                                geometry = new THREE.PlaneGeometry(10, 10, 4, 4);
+                                mesh = new THREE.Object3D();
+                                var submesh = new THREE.Object3D();
+                                var ground = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({color: color}));
+                                ground.scale.set(100, 100, 100);
+                                submesh.add(ground);
+                                ground.castShadow = true;
+                                ground.receiveShadow = true;
+                                mesh.add(submesh);
+                                break;
+                            case CANNON.Shape.types.BOX:
+                                geometry = new THREE.BoxGeometry(shape.halfExtents.x*2, shape.halfExtents.y*2, shape.halfExtents.z*2);
+                                mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({color: color}));
+                                break;
+                            case CANNON.Shape.types.CONVEXPOLYHEDRON:
+                                geometry = new THREE.Geometry();
+                                for (i = 0; i < shape.vertices.length; i++) {
+                                    var v = shape.vertices[i];
+                                    geometry.vertices.push(new THREE.Vector3(v.x, v.y, v.z));
+                                }
+                                for(i=0; i < shape.faces.length; i++){
+                                    var face = shape.faces[i];
+                                    var a = face[0];
+                                    for (j = 1; j < face.length - 1; j++) {
+                                        var b = face[j];
+                                        var c = face[j + 1];
+                                        geometry.faces.push(new THREE.Face3(a, b, c));
+                                    }
+                                }
+                                geometry.computeBoundingSphere();
+                                geometry.computeFaceNormals();
+                                mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({color: color}));
+                                break;
+                            case CANNON.Shape.types.HEIGHTFIELD:
+                                geometry = new THREE.Geometry();
+                                var v0 = new CANNON.Vec3();
+                                var v1 = new CANNON.Vec3();
+                                var v2 = new CANNON.Vec3();
+                                for (var xi = 0; xi < shape.data.length - 1; xi++) {
+                                    for (var yi = 0; yi < shape.data[xi].length - 1; yi++) {
+                                        for (var k = 0; k < 2; k++) {
+                                            shape.getConvexTrianglePillar(xi, yi, k===0);
+                                            v0.copy(shape.pillarConvex.vertices[0]);
+                                            v1.copy(shape.pillarConvex.vertices[1]);
+                                            v2.copy(shape.pillarConvex.vertices[2]);
+                                            v0.vadd(shape.pillarOffset, v0);
+                                            v1.vadd(shape.pillarOffset, v1);
+                                            v2.vadd(shape.pillarOffset, v2);
+                                            geometry.vertices.push(
+                                                    new THREE.Vector3(v0.x, v0.y, v0.z),
+                                                    new THREE.Vector3(v1.x, v1.y, v1.z),
+                                                    new THREE.Vector3(v2.x, v2.y, v2.z)
+                                            );
+                                            i = geometry.vertices.length - 3;
+                                            geometry.faces.push(new THREE.Face3(i, i+1, i+2));
+                                        }
+                                    }
+                                }
+                                geometry.computeBoundingSphere();
+                                geometry.computeFaceNormals();
+                                mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({color: color}));
+                                break;
+                        }
+                        mesh.receiveShadow = true;
+                        mesh.castShadow = true;
+                        if(mesh.children){
+                            for(i=0; i<mesh.children.length; i++){
+                                mesh.children[i].castShadow = true;
+                                mesh.children[i].receiveShadow = true;
+                                if(mesh.children[i]){
+                                    for(var j=0; j<mesh.children[i].length; j++){
+                                        mesh.children[i].children[j].castShadow = true;
+                                        mesh.children[i].children[j].receiveShadow = true;
+                                    }
+                                }
+                            }
+                        }
+                        var o = body.shapeOffsets[l];
+                        var q = body.shapeOrientations[l];
+                        mesh.position.set(o.x, o.y, o.z);
+                        mesh.quaternion.set(q.x, q.y, q.z, q.w);
+                        obj.add(mesh);
+                    }
+                    return obj;
+                }
+
+            }
+
+            /**
+             * three.js
+             * @returns {{update: update, getScene: getScene}}
+             * @constructor
+             */
+            function Viewer() {
+
+                var _scene = null;
+                var _camera = null;
+                var _light = null;
+                var _renderer = null;
+
+                (function(){
+                    // シーン
+                    _scene = new THREE.Scene();
+                    _scene.fog = new THREE.Fog(0x000000, 1, 75);
+                    // カメラ
+                    _camera = new THREE.PerspectiveCamera(30, STAGE_WIDTH / STAGE_HEIGHT, 1, 10000);
+                    _camera.up.set(0, 0, 1);
+                    _camera.position.set(Math.cos(Math.PI / 5) * 30, 10, Math.sin(Math.PI / 5) * 30);
+                    _camera.lookAt(new THREE.Vector3(0, 0, 0));
+                    _scene.add(_camera);
+                    // ライト
+                    _light = new THREE.DirectionalLight(0xffffff, 3);
+                    _light.position.set(10, -10, 10);
+                    _light.castShadow = true;
+                    _light.shadowMapWidth = 1024;
+                    _light.shadowMapHeight = 1024;
+                    _light.shadowCameraLeft = -10;
+                    _light.shadowCameraRight = 10;
+                    _light.shadowCameraTop = 10;
+                    _light.shadowCameraBottom = -10;
+                    _light.shadowCameraFar = 100;
+                    _light.shadowCameraNear = 0;
+                    _light.shadowDarkness = 0.5;
+                    _scene.add(_light);
+                    _scene.add(new THREE.AmbientLight(0x666666));
+                    // レンダラー
+                    _renderer = new THREE.WebGLRenderer({antialias: true});
+                    _renderer.setSize(STAGE_WIDTH, STAGE_HEIGHT);
+                    _renderer.setClearColor(0x000000, 1);
+                    _renderer.shadowMapEnabled = true;
+                    document.body.appendChild(_renderer.domElement);
+                    _renderer.render(_scene, _camera);
+                })();
+
+                return {
+                    update: update,
+                    getScene: getScene
+                };
+
+                // ---------- パブリックメソッド ---------- //
+
+                // 更新
+                function update(params) {
+                    var viecleX = params.viecleX;
+                    var viecleY = params.viecleY;
+                    var viecleZ = params.viecleZ;
+                    var viecleRotX = params.viecleRotX;
+                    var viecleRotY = params.viecleRotY;
+                    var viecleRotZ = params.viecleRotZ;
+                    // カメラ
+                    _camera.position.x = viecleX - (20 * Math.sin(viecleRotZ));
+                    _camera.position.y = viecleY - (20 * Math.cos(viecleRotZ));
+                    _camera.position.z = viecleZ + 5;
+                    _camera.lookAt(new THREE.Vector3(viecleX, viecleY, viecleZ));
+                    // レンダリング
+                    _renderer.clear();
+                    _renderer.render(_scene, _camera);
+                }
+
+                // シーン取得
+                function getScene() {
+                    return _scene;
+                }
+
+            }
+
+            /**
+             * cannon.js
+             * @returns {{update: update, getWorld: getWorld}}
+             * @constructor
+             */
+            function Physics() {
+
+                var _world = null;
+
+                (function(){
+                    // 物理世界を生成
+                    _world = new CANNON.World();
+                    // 重力を設定
+                    _world.gravity.set(0, 0, -9.82);
+                    // ぶつかっている「可能性のある」剛体同士を見つける作業
+                    _world.broadphase = new CANNON.SAPBroadphase(_world);
+                    // 反復計算回数
+                    _world.solver.iterations = 10;
+                    // 許容値
+                    _world.solver.tolerance = 0.1;
+                    //
+                    _world.defaultContactMaterial.friction = 0;
+                    _world.addContactMaterial(new CANNON.ContactMaterial(new CANNON.Material("wheelMaterial"), new CANNON.Material("groundMaterial"), {
+                        friction: 0.3,
+                        restitution: 0,
+                        contactEquationStiffness: 1000
+                    }));
+                })();
+
+                return {
+                    update: update,
+                    getWorld: getWorld
+                };
+
+                // ---------- パブリックメソッド ---------- //
+
+                // 更新
+                function update() {
+                    // 物理エンジンの時間を進める
+                    _world.step(1 / FPS);
+                }
+
+                // 物理世界取得
+                function getWorld() {
+                    return _world;
+                }
+
+            }
+
+            /**
+             * 車両
+             * @param params
+             * @returns {{create: create, update: update, setGear: setGear, onAccelerator: onAccelerator, offAccelerator: offAccelerator, onBrake: onBrake, offBrake: offBrake, turnLeft: turnLeft, turnRight: turnRight, returnStraight: returnStraight, getPosition: getPosition, getRotation: getRotation}}
+             * @constructor
+             */
+            function Viecle(params) {
+
+                var _world = params.world;
+                var _scene = params.scene;
+
+                var _MAX_STEER_VAL = 0.5;
+                var _MAX_FORCE = 1000;
+                var _BRAKE_FORCE = 20;
+                var _STEERING_SPEED = 0.02;
+
+                var _body = null;
+                var _mesh = null;
+                var _wheelInfoArr = null;
+                var _raycastVehicle = null;
+                var _gear = 0;
+                var _steeringAngle = 0;
+                var _intervalId = null;
+
+                (function(){
+                })();
+
+                return {
+                    create: create,
+                    update: update,
+                    setGear: setGear,
+                    onAccelerator: onAccelerator,
+                    offAccelerator: offAccelerator,
+                    onBrake: onBrake,
+                    offBrake: offBrake,
+                    turnLeft: turnLeft,
+                    turnRight: turnRight,
+                    returnStraight: returnStraight,
+                    getPosition: getPosition,
+                    getRotation: getRotation
+                };
+
+                // ---------- パブリックメソッド ---------- //
+
+                // 生成
+                function create() {
+                    // 車体追加
+                    _body = new CANNON.Body({mass: 500});
+                    _body.addShape(new CANNON.Box(new CANNON.Vec3(2, 1, 0.5)));
+                    _body.position.set(0, 1, 0);
+                    _mesh = Utility().shape2mesh({
+                        body: _body,
+                        color: 0xff0000
+                    });
+                    _scene.add(_mesh);
+                    // 車生成
+                    var options = {
+                        radius: 0.5,
+                        directionLocal: new CANNON.Vec3(0, 0, -1),
+                        suspensionStiffness: 50,
+                        suspensionRestLength: 0.5,
+                        frictionSlip: 5,
+                        dampingRelaxation: 2.3,
+                        dampingCompression: 4.4, // 跳ね返る強さ
+                        maxSuspensionForce: 100000,
+                        rollInfluence:  0.01,
+                        axleLocal: new CANNON.Vec3(0, 1, 0),
+                        chassisConnectionPointLocal: new CANNON.Vec3(1, 1, 0),
+                        maxSuspensionTravel: 0.3,
+                        customSlidingRotationalSpeed: -30,
+                        useCustomSlidingRotationalSpeed: true
+                    };
+                    // 車両ヘルパークラス
+                    _raycastVehicle = new CANNON.RaycastVehicle({chassisBody: _body});
+                    options.chassisConnectionPointLocal.set(1, 1, 0);
+                    _raycastVehicle.addWheel(options);
+                    options.chassisConnectionPointLocal.set(1, -1, 0);
+                    _raycastVehicle.addWheel(options);
+                    options.chassisConnectionPointLocal.set(-1, 1, 0);
+                    _raycastVehicle.addWheel(options);
+                    options.chassisConnectionPointLocal.set(-1, -1, 0);
+                    _raycastVehicle.addWheel(options);
+                    _raycastVehicle.addToWorld(_world);
+                    //
+                    _wheelInfoArr = [];
+                    for(var i=0; i < _raycastVehicle.wheelInfos.length; i++) {
+                        var wheel = _raycastVehicle.wheelInfos[i];
+                        var body = new CANNON.Body({mass: 1});
+                        var q = new CANNON.Quaternion();
+                        q.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), Math.PI / 2);
+                        body.addShape(new CANNON.Cylinder(wheel.radius, wheel.radius, wheel.radius, 20), new CANNON.Vec3(), q);
+                        var mesh = Utility().shape2mesh({
+                            body: body,
+                            color: 0x000000
+                        });
+                        _scene.add(mesh);
+                        _wheelInfoArr.push({
+                            body: body,
+                            mesh: mesh
+                        });
+                    }
+                    // ホイール更新
+                    _world.addEventListener("postStep", function(){
+                        for (var i = 0; i < _wheelInfoArr.length; i++) {
+                            _raycastVehicle.updateWheelTransform(i);
+                            var t = _raycastVehicle.wheelInfos[i].worldTransform;
+                            var info = _wheelInfoArr[i];
+                            info.body.position.copy(t.position);
+                            info.body.quaternion.copy(t.quaternion);
+                        }
+                    });
+                }
+
+                // 更新
+                function update() {
+                    _mesh.position.copy(_body.position);
+                    _mesh.quaternion.copy(_body.quaternion);
+                    var i = 0, max;
+                    for (i = 0, max = _wheelInfoArr.length; i < max; i = i + 1) {
+                        var info = _wheelInfoArr[i];
+                        info.mesh.position.copy(info.body.position);
+                        info.mesh.quaternion.copy(info.body.quaternion);
+                    }
+                }
+
+                // ギア設定
+                function setGear(params) {
+                    _gear = params.val;
+                }
+
+                // アクセルオン
+                function onAccelerator() {
+                    if (1 <= _gear) {
+                        _applyEngineForce(-_MAX_FORCE);
+                    } else if (_gear <= -1) {
+                        _applyEngineForce(_MAX_FORCE);
+                    }
+                }
+
+                // アクセルオフ
+                function offAccelerator() {
+                    _applyEngineForce(0);
+                }
+
+                // ブレーキオン
+                function onBrake() {
+                    _setBrake(_BRAKE_FORCE);
+                }
+
+                // ブレーキオフ
+                function offBrake() {
+                    _setBrake(0);
+                }
+
+                // 左に曲がる
+                function turnLeft() {
+                    if (_intervalId) clearInterval(_intervalId);
+                    _intervalId = setInterval(function(){
+                        _steeringAngle -= _STEERING_SPEED;
+                        if (_steeringAngle <= -_MAX_STEER_VAL) {
+                            if (_intervalId) clearInterval(_intervalId);
+                            _steeringAngle = -_MAX_STEER_VAL;
+                        }
+                        _setSteeringAngle(_steeringAngle);
+                    }, 1000 / FPS);
+                }
+
+                // 右に曲がる
+                function turnRight() {
+                    if (_intervalId) clearInterval(_intervalId);
+                    _intervalId = setInterval(function(){
+                        _steeringAngle += _STEERING_SPEED;
+                        if (_MAX_STEER_VAL <= _steeringAngle) {
+                            if (_intervalId) clearInterval(_intervalId);
+                            _steeringAngle = _MAX_STEER_VAL;
+                        }
+                        _setSteeringAngle(_steeringAngle);
+                    }, 1000 / FPS);
+                }
+
+                // まっすぐに戻る
+                function returnStraight() {
+                    if (_intervalId) clearInterval(_intervalId);
+                    _intervalId = setInterval(function(){
+                        if (0 < _steeringAngle) _steeringAngle -= _STEERING_SPEED;
+                        if (_steeringAngle < 0) _steeringAngle += _STEERING_SPEED;
+                        if (Math.abs(0 - _steeringAngle) < _STEERING_SPEED) {
+                            if (_intervalId) clearInterval(_intervalId);
+                            _steeringAngle = 0;
+                        }
+                        _setSteeringAngle(_steeringAngle);
+                    }, 1000 / FPS);
+                }
+
+                // 位置取得
+                function getPosition() {
+                    return {
+                        x: _raycastVehicle.chassisBody.position.x,
+                        y: _raycastVehicle.chassisBody.position.y,
+                        z: _raycastVehicle.chassisBody.position.z
+                    };
+                }
+
+                // 体勢取得
+                function getRotation() {
+                    return {
+                        x: _mesh.rotation.x,
+                        y: _mesh.rotation.y,
+                        z: -_mesh.rotation.z + (90 * Math.PI / 180)
+                    }
+                }
+
+                // ---------- プライベートメソッド ---------- //
+
+                function _applyEngineForce(val) {
+                    _raycastVehicle.applyEngineForce(val, 2);
+                    _raycastVehicle.applyEngineForce(val, 3);
+                }
+
+                function _setBrake(val) {
+                    _raycastVehicle.setBrake(val, 0);
+                    _raycastVehicle.setBrake(val, 1);
+                    _raycastVehicle.setBrake(val, 2);
+                    _raycastVehicle.setBrake(val, 3);
+                }
+
+                function _setSteeringAngle(val) {
+                    _raycastVehicle.setSteeringValue(val, 0);
+                    _raycastVehicle.setSteeringValue(val, 1);
+                }
+
+            }
+
+            /**
+             * 地面
+             * @param params
+             * @returns {{create: create, update: update}}
+             * @constructor
+             */
+            function Field(params) {
+
+                var _world = params.world;
+                var _scene = params.scene;
+
+                var _SIZE_X = 200;
+                var _SIZE_Y = 200;
+                var _HEIGHT = 2;
+                var _DENSITY = 10;
+
+                var _body = null;
+                var _mesh = null;
+
+                (function(){
+                })();
+
+                return {
+                    create: create,
+                    update: update
+                };
+
+                // ---------- パブリックメソッド ---------- //
+
+                // 生成
+                function create() {
+                    // 地面作成
+                    var matrix = [];
+                    for (var i = 0; i < _SIZE_X; i++) {
+                        matrix.push([]);
+                        for (var j = 0; j < _SIZE_Y; j++) {
+                            var height = Math.cos(i / _SIZE_X * Math.PI * _DENSITY) * Math.cos(j / _SIZE_Y * Math.PI * _DENSITY) * _HEIGHT + 2;
+                            if(i === 0 || i === _SIZE_X - 1 || j === 0 || j === _SIZE_Y - 1) {
+                                height = 10;
+                            }
+                            matrix[i].push(height);
+                        }
+                    }
+                    var shape = new CANNON.Heightfield(matrix, {elementSize: 200 / _SIZE_X});
+                    _body = new CANNON.Body({mass: 0});
+                    _body.addShape(shape);
+                    _body.position.set(-_SIZE_X * shape.elementSize / 2, -_SIZE_Y * shape.elementSize / 2, -5);
+                    _world.add(_body);
+                    _mesh = Utility().shape2mesh({
+                        body: _body,
+                        color: 0x666666
+                    });
+                    _scene.add(_mesh);
+                }
+
+                // 更新
+                function update() {
+                    _mesh.position.copy(_body.position);
+                    _mesh.quaternion.copy(_body.quaternion);
+                }
+
+            }
+
+            /**
+             * キー操作
+             * @returns {{addListener: addListener, removeListener: removeListener}}
+             * @constructor
+             */
+            function Controller() {
+
+                var _$document = $(document);
+
+                (function(){
+                })();
+
+                return {
+                    addListener: addListener,
+                    removeListener: removeListener
+                };
+
+                // ---------- パブリックメソッド ---------- //
+
+                // キー操作監視
+                function addListener() {
+                    _$document.on("keydown", _onKeydown);
+                    _$document.on("keyup", _onKeyup);
+                }
+
+                // キー操作監視停止
+                function removeListener() {
+                    _$document.off("keydown", _onKeydown);
+                    _$document.off("keyup", _onKeyup);
+                }
+
+                // ---------- プライベートメソッド ---------- //
+
+                function _onKeydown(e){
+                    switch(e.keyCode){
+                        case KEY_CODE_UP:
+                            // ギア設定イベント
+                            setGearEvent({val: 1});
+                            // アクセルオンイベント
+                            onAcceleratorEvent();
+                            break;
+                        case KEY_CODE_DOWN:
+                            // ギア設定イベント
+                            setGearEvent({val: -1});
+                            // アクセルオンイベント
+                            onAcceleratorEvent();
+                            break;
+                        case KEY_CODE_SPACE:
+                            // ブレーキオンイベント
+                            onBrakeEvent();
+                            break;
+                        case KEY_CODE_RIGHT:
+                            // 右に曲がるイベント
+                            turnRightEvent();
+                            break;
+                        case KEY_CODE_LEFT:
+                            // 左に曲がるイベント
+                            turnLeftEvent();
+                            break;
+                    }
+                }
+
+                function _onKeyup(e){
+                    switch(e.keyCode){
+                        case KEY_CODE_UP:
+                            // ギア設定イベント
+                            setGearEvent({val: 0});
+                            // アクセルオフイベント
+                            offAcceleratorEvent();
+                            break;
+                        case KEY_CODE_DOWN:
+                            // ギア設定イベント
+                            setGearEvent({val: 0});
+                            // アクセルオフイベント
+                            offAcceleratorEvent();
+                            break;
+                        case KEY_CODE_SPACE:
+                            // ブレーキオフイベント
+                            offBrakeEvent();
+                            break;
+                        case KEY_CODE_RIGHT:
+                            // まっすぐに戻るイベント
+                            returnStraightEvent();
+                            break;
+                        case KEY_CODE_LEFT:
+                            // まっすぐに戻るイベント
+                            returnStraightEvent();
+                            break;
+                    }
+                }
+
+            }
+
+        });
+        </script>
+    </body>
+</html>
